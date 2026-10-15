@@ -5,6 +5,39 @@
 
 const BEIJING_OFFSET = 8 * 60 * 60 * 1000 // UTC+8 毫秒偏移
 
+export function getBeijingDateStr(date: Date): string {
+  const bj = toBeijingDate(date)
+  const year = bj.getUTCFullYear()
+  const month = String(bj.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(bj.getUTCDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+export function getBeijingDayRange(dateStr: string) {
+  return {
+    start: new Date(`${dateStr}T00:00:00+08:00`),
+    end: new Date(`${dateStr}T23:59:59.999+08:00`),
+  }
+}
+
+export function splitDurationByBeijingDay(
+  startMs: number,
+  endMs: number,
+  callback: (dayStr: string, durationMinutes: number) => void,
+): void {
+  if (endMs <= startMs) return
+
+  let cursor = startMs
+  while (cursor < endMs) {
+    const dayStr = getBeijingDateStr(new Date(cursor))
+    const { end } = getBeijingDayRange(dayStr)
+    const segmentEnd = Math.min(endMs, end.getTime() + 1)
+    const minutes = Math.round((segmentEnd - cursor) / 60_000)
+    if (minutes > 0) callback(dayStr, minutes)
+    cursor = end.getTime() + 1
+  }
+}
+
 /**
  * 将任意 Date 对象转换为北京时间的 Date（通过加偏移）
  * 注意：返回的 Date 的 getUTCXxx() 方法返回的是北京时间的值
@@ -58,11 +91,7 @@ export function formatBeijingDateTimeLabel(isoString: string): string {
  * 获取当前北京时间的 yyyy-MM-dd 字符串
  */
 export function getBeijingToday(): string {
-  const bj = toBeijingDate(new Date())
-  const y = bj.getUTCFullYear()
-  const m = String(bj.getUTCMonth() + 1).padStart(2, '0')
-  const d = String(bj.getUTCDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
+  return getBeijingDateStr(new Date())
 }
 
 /**
