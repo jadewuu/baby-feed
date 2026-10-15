@@ -61,6 +61,8 @@ export interface LocalFeedingRecord {
   updatedAt: string
 }
 
+export type FeedingRecordInput = Omit<LocalFeedingRecord, 'id' | 'createdAt' | 'updatedAt'>
+
 export interface LocalHealthRecord {
   id: string
   babyId: string
@@ -88,6 +90,10 @@ export interface LocalHealthRecord {
   updatedAt: string
 }
 
+export type HealthRecordInput = Omit<LocalHealthRecord, 'id' | 'createdAt' | 'updatedAt'> & {
+  toothCodes?: PrimaryToothCode[]
+}
+
 export interface LocalToothEruption {
   id: string
   healthRecordId: string
@@ -109,6 +115,9 @@ export interface LocalMemo {
   createdAt: string
   updatedAt: string
 }
+
+export type MemoInput = Pick<LocalMemo, 'babyId' | 'title' | 'content' | 'scheduledAt'>
+export type MemoPatch = Partial<Pick<LocalMemo, 'title' | 'content' | 'scheduledAt' | 'completed'>>
 
 export interface LocalMetadata {
   key: string
