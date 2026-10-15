@@ -1,5 +1,5 @@
-import { FEEDING_TYPES, type FeedingType } from '@/lib/feeding-records'
-import { HEALTH_TYPES, type HealthType } from '@/lib/health-records'
+import { FEEDING_TYPES, type FeedingType } from './feeding-records.ts'
+import { HEALTH_TYPES, type HealthType } from './health-records.ts'
 
 export type QuickRecordGroupKey = 'GROUP_FEEDING' | 'GROUP_HEALTH' | 'GROUP_MEMO'
 export type QuickRecordKey = QuickRecordGroupKey | FeedingType | HealthType

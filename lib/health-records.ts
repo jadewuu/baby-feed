@@ -1,12 +1,12 @@
-import { toBeijingISO } from '@/lib/time'
-import type { PrimaryToothCode } from '@/lib/tooth-eruptions'
+import { toBeijingISO } from './time.ts'
+import type { PrimaryToothCode } from './tooth-eruptions.ts'
 
 export {
   buildVaccineSuggestionKey,
   buildVaccineSuggestions,
   findSelectedVaccineSuggestion,
-} from '@/lib/vaccine-suggestions'
-export type { VaccineSuggestion } from '@/lib/vaccine-suggestions'
+} from './vaccine-suggestions.ts'
+export type { VaccineSuggestion } from './vaccine-suggestions.ts'
 
 export const HEALTH_TYPES = ['WEIGHT', 'HEIGHT', 'TEMPERATURE', 'MEDICATION', 'VACCINE', 'DIAPER', 'AD_VITAMIN', 'SLEEP', 'TOOTH_ERUPTION', 'CUSTOM'] as const
 export type HealthType = typeof HEALTH_TYPES[number]
