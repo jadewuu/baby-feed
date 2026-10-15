@@ -1,7 +1,6 @@
 'use client'
 
-import { useEffect, useCallback, useState } from 'react'
-import { useSession, signOut } from 'next-auth/react'
+import { useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -10,11 +9,10 @@ import {
   Calendar,
   PlusCircle,
   BarChart2,
-  Settings,
-  LogOut
+  Settings
 } from 'lucide-react'
 import { useRecordComposer } from '@/components/RecordComposerProvider'
-import { clearPrivateClientState } from '@/lib/client-cache'
+import { withBasePath } from '@/lib/base-path'
 
 const navItems = [
   { href: '/', label: '首页', icon: Home },
@@ -24,16 +22,10 @@ const navItems = [
   { href: '/settings', label: '设置', icon: Settings },
 ]
 
-const authRoutes = new Set(['/login', '/register'])
-
 export default function Navbar() {
-  const { data: session, status } = useSession()
-  const [isSigningOut, setIsSigningOut] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
   const { isOpen: isRecordComposerOpen, openComposer } = useRecordComposer()
-  const isAuthPage = authRoutes.has(pathname)
-  const shouldShowNavbar = status === 'authenticated' && !!session && !isAuthPage && !isSigningOut
 
   const prefetchRoute = useCallback((href: string) => {
     if (href === pathname) {
@@ -44,16 +36,6 @@ export default function Navbar() {
   }, [pathname, router])
 
   useEffect(() => {
-    if (status !== 'authenticated') {
-      setIsSigningOut(false)
-    }
-  }, [status])
-
-  useEffect(() => {
-    if (!shouldShowNavbar) {
-      return
-    }
-
     const warmRoutes = () => {
       navItems.forEach((item) => {
         prefetchRoute(item.href)
@@ -65,20 +47,7 @@ export default function Navbar() {
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [prefetchRoute, shouldShowNavbar])
-
-  const handleSignOut = async () => {
-    try {
-      setIsSigningOut(true)
-      await clearPrivateClientState()
-      await signOut({ callbackUrl: '/login' })
-    } catch (error) {
-      console.error('Sign out failed:', error)
-      setIsSigningOut(false)
-    }
-  }
-
-  if (!shouldShowNavbar) return null
+  }, [prefetchRoute])
 
   return (
     <>
@@ -87,7 +56,7 @@ export default function Navbar() {
           <div className="flex justify-between h-14">
             <div className="flex items-center">
               <Link href="/" className="flex items-center space-x-2">
-                <Image src="/icon.svg" alt="" width={28} height={28} priority />
+                <Image src={withBasePath('/icon.svg')} alt="" width={28} height={28} priority />
                 <span className="font-bold text-xl text-gray-900">Baby Feed</span>
               </Link>
             </div>
@@ -134,14 +103,6 @@ export default function Navbar() {
                   </Link>
                 )
               })}
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="flex items-center space-x-1 px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-50 transition"
-              >
-                <LogOut size={18} />
-                <span className="text-sm font-medium">退出</span>
-              </button>
             </div>
           </div>
         </div>

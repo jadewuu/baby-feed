@@ -11,7 +11,6 @@ import {
   type ReactNode,
 } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { useSession } from 'next-auth/react'
 import {
   ArrowLeft,
   Check,
@@ -28,7 +27,6 @@ import RecordComposerEditor from '@/components/record-composer/RecordComposerEdi
 import { getBeijingNow, toBeijingDatetimeLocal } from '@/lib/time'
 import { invalidateRecordRelatedCaches } from '@/lib/cache-helpers'
 import {
-  clearPrivateBrowserState,
   getActiveTimerStorageKey,
 } from '@/lib/client-cache'
 import {
@@ -94,8 +92,8 @@ function parseStoredActiveTimer(value: string): ActiveRecordTimer | null {
 export function RecordComposerProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
-  const { data: session, status } = useSession()
-  const userId = session?.user?.id ?? null
+  const status = 'authenticated'
+  const userId = 'local'
   const [isOpen, setIsOpen] = useState(false)
   const [selectedType, setSelectedType] = useState<ComposerRecordType | null>(null)
   const [babies, setBabies] = useState<BabyOption[]>([])
@@ -135,11 +133,6 @@ export function RecordComposerProvider({ children }: { children: ReactNode }) {
   }, [userId])
 
   useEffect(() => {
-    const previousUserId = previousUserIdRef.current
-    if (
-      (previousUserId && previousUserId !== userId)
-      || (!userId && status === 'unauthenticated')
-    ) clearPrivateBrowserState()
     previousUserIdRef.current = userId
 
     setIsOpen(false)

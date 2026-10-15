@@ -1,11 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { headers } from 'next/headers'
-import { NextRequest } from 'next/server'
 import Image from 'next/image'
 import localFont from "next/font/local";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
-import { auth } from '@/lib/auth'
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -28,12 +25,12 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "Baby Feed - 婴儿科学喂养与成长记录",
   description: "记录婴儿喂养、睡眠与成长数据，帮助家庭更科学地了解宝宝的日常状态",
-  manifest: "/manifest.json",
+  manifest: "/baby-feed/manifest.json",
   icons: {
     icon: [
-      { url: "/icon.svg?v=8", type: "image/svg+xml" },
+      { url: "/baby-feed/icon.svg?v=8", type: "image/svg+xml" },
     ],
-    apple: "/icons/icon-192x192.png?v=8",
+    apple: "/baby-feed/icons/icon-192x192.png?v=8",
   },
   appleWebApp: {
     capable: true,
@@ -48,21 +45,11 @@ export const metadata: Metadata = {
   },
 };
 
-async function getServerSession() {
-  const headerStore = await headers()
-  const protocol = headerStore.get('x-forwarded-proto') ?? 'http'
-  const host = headerStore.get('x-forwarded-host') ?? headerStore.get('host') ?? 'localhost:3000'
-
-  return auth(new NextRequest(`${protocol}://${host}`, { headers: headerStore }))
-}
-
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await getServerSession()
-
   return (
     <html lang="zh-CN" data-scroll-behavior="smooth" style={{ colorScheme: 'light' }}>
       <head>
@@ -74,12 +61,12 @@ export default async function RootLayout({
         {/* Browser splash; installed PWAs use the platform launch screen only. */}
         <div id="splash" className="splash-screen" suppressHydrationWarning>
           <div className="splash-brand">
-            <Image className="splash-mark" src="/icon.svg" alt="" width={76} height={76} priority />
+            <Image className="splash-mark" src="/baby-feed/icon.svg" alt="" width={76} height={76} priority />
             <p className="splash-name">Baby Feed</p>
           </div>
           <span className="splash-progress" aria-hidden="true" />
         </div>
-        <Providers session={session}>
+        <Providers>
           {children}
         </Providers>
         <script
@@ -96,7 +83,7 @@ export default async function RootLayout({
                 }
               } else if ('serviceWorker' in navigator) {
                 window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js').then(
+                  navigator.serviceWorker.register('/baby-feed/sw.js').then(
                     function(registration) {
                       console.log('SW registered: ', registration.scope);
                     },
