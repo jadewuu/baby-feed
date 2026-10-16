@@ -23,6 +23,8 @@ import {
   normalizeQuickRecordKeys,
   type QuickRecordKey,
 } from '@/lib/quick-records'
+import { useLocalData } from '@/components/LocalDataProvider'
+import { getSettings, setQuickRecordKeys } from '@/lib/local-store/settings'
 
 interface Props {
   onBack: () => void
@@ -45,6 +47,7 @@ function moveKeyToIndex(keys: QuickRecordKey[], key: QuickRecordKey, targetIndex
 
 export default function QuickRecordSettings({ onBack }: Props) {
   const { showCopyToast } = useCopyToast()
+  const { commit } = useLocalData()
   const [keys, setKeys] = useState<QuickRecordKey[]>([...DEFAULT_QUICK_RECORD_KEYS])
   const [savedKeys, setSavedKeys] = useState<QuickRecordKey[]>([...DEFAULT_QUICK_RECORD_KEYS])
   const [loading, setLoading] = useState(true)
@@ -62,10 +65,8 @@ export default function QuickRecordSettings({ onBack }: Props) {
 
     async function loadSettings() {
       try {
-        const response = await fetch('/api/user/quick-records')
-        const result = await response.json().catch(() => null)
-        if (!response.ok) throw new Error(result?.error || '获取快捷记录失败')
-        const loadedKeys = normalizeQuickRecordKeys(result?.keys)
+        const result = await getSettings()
+        const loadedKeys = normalizeQuickRecordKeys(result.quickRecordKeys)
         if (!active) return
         setKeys(loadedKeys)
         setSavedKeys(loadedKeys)
@@ -231,14 +232,8 @@ export default function QuickRecordSettings({ onBack }: Props) {
     setSaving(true)
     setError('')
     try {
-      const response = await fetch('/api/user/quick-records', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keys }),
-      })
-      const result = await response.json().catch(() => null)
-      if (!response.ok) throw new Error(result?.error || '保存快捷记录失败')
-      const updatedKeys = normalizeQuickRecordKeys(result?.keys)
+      const updatedKeys = normalizeQuickRecordKeys(keys)
+      await commit(() => setQuickRecordKeys(updatedKeys))
       setKeys(updatedKeys)
       setSavedKeys(updatedKeys)
       showCopyToast('快捷记录已保存')

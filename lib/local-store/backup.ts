@@ -172,6 +172,16 @@ export function validateBackup(value: unknown): ValidatedBackup {
   return structuredClone(value) as ValidatedBackup
 }
 
+export function parseBackupText(text: string): ValidatedBackup {
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    throw new LocalStoreError('validation', '备份文件不是有效的 JSON 格式')
+  }
+  return validateBackup(value)
+}
+
 export async function exportBackup(): Promise<BabyFeedBackup> {
   const db = await openBabyFeedDb()
   const [metadata, babies, feedingRecords, healthRecords, toothEruptions, memos, persistedSettings] = await Promise.all([
