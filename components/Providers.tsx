@@ -5,6 +5,7 @@ import { LocalDataProvider, useLocalData } from './LocalDataProvider'
 import Navbar from './Navbar'
 import { CopyToastProvider } from './CopyToast'
 import { RecordComposerProvider } from './RecordComposerProvider'
+import ServiceWorkerManager from './ServiceWorkerManager'
 
 function LocalAppShell({ children }: { children: React.ReactNode }) {
   const { status, error, refresh } = useLocalData()
@@ -47,8 +48,11 @@ function LocalAppShell({ children }: { children: React.ReactNode }) {
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <LocalDataProvider>
-      <LocalAppShell>{children}</LocalAppShell>
-    </LocalDataProvider>
+    <>
+      <ServiceWorkerManager />
+      <LocalDataProvider>
+        <LocalAppShell>{children}</LocalAppShell>
+      </LocalDataProvider>
+    </>
   )
 }

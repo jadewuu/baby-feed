@@ -34,10 +34,11 @@ test('the application shell boots through local data state', async () => {
 
 test('static shell assets use the GitHub Pages base path', async () => {
   const layout = await source('app/layout.tsx')
+  const serviceWorkerManager = await source('components/ServiceWorkerManager.tsx')
 
   assert.match(layout, /\/baby-feed\/manifest\.json/)
   assert.match(layout, /\/baby-feed\/icon\.svg/)
-  assert.match(layout, /\/baby-feed\/sw\.js/)
+  assert.match(serviceWorkerManager, /withBasePath\('\/sw\.js'\)/)
 })
 
 test('navbar keeps care navigation without account controls', async () => {

@@ -72,18 +72,6 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/baby-feed/sw.js').then(
-                    function(registration) {
-                      console.log('SW registered: ', registration.scope);
-                    },
-                    function(err) {
-                      console.log('SW registration failed: ', err);
-                    }
-                  );
-                });
-              }
               // Dismiss splash screen after hydration
               requestAnimationFrame(function() {
                 setTimeout(function() {
