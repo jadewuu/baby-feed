@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getBeijingNow, toBeijingISO } from '@/lib/time'
-import { invalidateRecordRelatedCaches } from '@/lib/cache-helpers'
+import { useLocalData } from '@/components/LocalDataProvider'
+import { createFeedingRecord } from '@/lib/local-store/records'
+import type { FeedingRecordInput } from '@/lib/local-store/schema'
 import { buildFeedingRecordPayload, getFeedingValidationMessage, getBreastModeFromType, type BreastMode, type FeedingFieldValues, type FeedingType } from '@/lib/feeding-records'
 import FeedingRecordFields from '@/components/FeedingRecordFields'
 import RecordActionBar from '@/components/RecordActionBar'
@@ -69,6 +71,7 @@ export default function FeedingForm({
   onTabChange
 }: Props) {
   const router = useRouter()
+  const { babies: localBabies, activeBabyId, commit } = useLocalData()
   const [babies, setBabies] = useState<BabyInfo[]>(initialBabies)
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -92,15 +95,10 @@ export default function FeedingForm({
   const hasHydratedLocalDraft = useRef(false)
 
   useEffect(() => {
-    if (initialBabies.length > 0) {
-      setBabies(initialBabies)
-      setBabyId(currentBabyId => currentBabyId || initialSharedDraft?.babyId || initialBabies[0].id)
-      return
-    }
-
-    fetchBabies()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialBabies, initialSharedDraft?.babyId])
+    const availableBabies = localBabies.length > 0 ? localBabies : initialBabies
+    setBabies(availableBabies)
+    setBabyId(currentBabyId => currentBabyId || initialSharedDraft?.babyId || activeBabyId || availableBabies[0]?.id || '')
+  }, [activeBabyId, initialBabies, initialSharedDraft?.babyId, localBabies])
 
   useEffect(() => {
     if (initialType === 'formula') {
@@ -235,23 +233,6 @@ export default function FeedingForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [babyId, type, breastMode, leftBreastDuration, rightBreastDuration, breastMilkAmount, formulaAmount, solidFoodName, solidFoodAmount, startTime, notes])
 
-  const fetchBabies = async () => {
-    try {
-      const response = await fetch('/api/babies')
-      if (response.ok) {
-        const data = await response.json()
-        if (Array.isArray(data)) {
-          setBabies(data)
-          if (data.length > 0) {
-            setBabyId(currentBabyId => currentBabyId || initialSharedDraft?.babyId || data[0].id)
-          }
-        }
-      }
-    } catch (error) {
-      console.error('获取婴儿列表失败:', error)
-    }
-  }
-
   const fieldValues: FeedingFieldValues = {
     leftBreastDuration,
     rightBreastDuration,
@@ -327,26 +308,16 @@ export default function FeedingForm({
 
     let saved = false
     try {
-      const data: Record<string, unknown> = {
+      const data = {
         babyId,
         type,
         startTime: toBeijingISO(startTime),
         notes: notes.trim() || null,
         ...buildFeedingRecordPayload(type, fieldValues)
-      }
+      } as FeedingRecordInput
 
-      const response = await fetch('/api/feeding', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      })
-
-      if (response.ok) {
-        saved = true
-      } else {
-        const error = await response.json()
-        setSubmitError(error.error || '保存失败')
-      }
+      await commit(() => createFeedingRecord(data))
+      saved = true
     } catch (error) {
       console.error('保存失败:', error)
       setSubmitError('保存失败，请重试')
@@ -356,7 +327,6 @@ export default function FeedingForm({
 
     // 保存成功后的跳转操作放在 try 外部，避免 router 异常触发假失败
     if (saved) {
-      invalidateRecordRelatedCaches(babyId)
       window.sessionStorage.removeItem(FEEDING_DRAFT_STORAGE_KEY)
       window.sessionStorage.setItem('record_saved_ts', String(Date.now()))
       onRecordSaved?.()

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getBeijingNow, toBeijingISO } from '@/lib/time'
-import { invalidateRecordRelatedCaches } from '@/lib/cache-helpers'
+import { useLocalData } from '@/components/LocalDataProvider'
+import { createMemo } from '@/lib/local-store/memos'
 import RecordActionBar from '@/components/RecordActionBar'
 import RecordTabBar, { type ActiveTab } from '@/components/RecordTabBar'
 import {
@@ -47,6 +48,7 @@ export default function MemoForm({
   onTabChange
 }: Props) {
   const router = useRouter()
+  const { babies: localBabies, activeBabyId, commit } = useLocalData()
   const [babies, setBabies] = useState<BabyInfo[]>(initialBabies)
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -59,15 +61,10 @@ export default function MemoForm({
   const hasHydratedLocalDraft = useRef(false)
 
   useEffect(() => {
-    if (initialBabies.length > 0) {
-      setBabies(initialBabies)
-      setBabyId(currentBabyId => currentBabyId || initialSharedDraft?.babyId || initialBabies[0].id)
-      return
-    }
-
-    fetchBabies()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialBabies, initialSharedDraft?.babyId])
+    const availableBabies = localBabies.length > 0 ? localBabies : initialBabies
+    setBabies(availableBabies)
+    setBabyId(currentBabyId => currentBabyId || initialSharedDraft?.babyId || activeBabyId || availableBabies[0]?.id || '')
+  }, [activeBabyId, initialBabies, initialSharedDraft?.babyId, localBabies])
 
   useEffect(() => {
     if (!initialSharedDraft || hasHydratedSharedDraft.current) {
@@ -138,23 +135,6 @@ export default function MemoForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [babyId, title, content, scheduledAt])
 
-  const fetchBabies = async () => {
-    try {
-      const response = await fetch('/api/babies')
-      if (response.ok) {
-        const data = await response.json()
-        if (Array.isArray(data)) {
-          setBabies(data)
-          if (data.length > 0) {
-            setBabyId(currentBabyId => currentBabyId || initialSharedDraft?.babyId || data[0].id)
-          }
-        }
-      }
-    } catch (error) {
-      console.error('获取婴儿列表失败:', error)
-    }
-  }
-
   const getValidationMessage = useCallback(() => {
     if (!babyId) return '请先选择宝宝'
     if (!title.trim()) return '请输入备忘标题'
@@ -177,23 +157,13 @@ export default function MemoForm({
 
     let saved = false
     try {
-      const response = await fetch('/api/memo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          babyId,
-          title: title.trim(),
-          content: content.trim() || null,
-          scheduledAt: toBeijingISO(scheduledAt),
-        })
-      })
-
-      if (response.ok) {
-        saved = true
-      } else {
-        const error = await response.json()
-        setSubmitError(error.error || '保存失败')
-      }
+      await commit(() => createMemo({
+        babyId,
+        title: title.trim(),
+        content: content.trim() || null,
+        scheduledAt: toBeijingISO(scheduledAt),
+      }))
+      saved = true
     } catch (error) {
       console.error('保存失败:', error)
       setSubmitError('保存失败，请重试')
@@ -202,7 +172,6 @@ export default function MemoForm({
     }
 
     if (saved) {
-      invalidateRecordRelatedCaches(babyId)
       window.sessionStorage.removeItem(MEMO_DRAFT_STORAGE_KEY)
       window.sessionStorage.setItem('record_saved_ts', String(Date.now()))
       onRecordSaved?.()

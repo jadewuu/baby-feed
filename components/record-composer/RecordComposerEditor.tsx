@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import FeedingRecordFields from '@/components/FeedingRecordFields'
 import HealthRecordFields, { getHealthFieldValidationMessage } from '@/components/HealthRecordFields'
-import { invalidateRecordRelatedCaches } from '@/lib/cache-helpers'
+import { useLocalData } from '@/components/LocalDataProvider'
 import {
   buildFeedingRecordPayload,
   getFeedingValidationMessage,
@@ -33,6 +33,9 @@ import {
   type VaccineSuggestion,
 } from '@/lib/health-records'
 import { getBeijingNow, toBeijingISO } from '@/lib/time'
+import { createMemo } from '@/lib/local-store/memos'
+import { createFeedingRecord, createHealthRecord, listHealthHistory } from '@/lib/local-store/records'
+import type { FeedingRecordInput, HealthRecordInput, MemoInput } from '@/lib/local-store/schema'
 import {
   getRecordKind,
   getRecordTypeMeta,
@@ -132,6 +135,7 @@ export default function RecordComposerEditor({
   onStartSleepTimer,
   onFinishTimer,
 }: Props) {
+  const { commit } = useLocalData()
   const [loading, setLoading] = useState(false)
   const [submitAttempted, setSubmitAttempted] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -164,13 +168,9 @@ export default function RecordComposerEditor({
 
     let cancelled = false
     setVaccineSuggestionsLoading(true)
-    fetch(`/api/health?babyId=${draft.babyId}&type=VACCINE`)
-      .then(async response => {
-        if (!response.ok) throw new Error('获取疫苗记录失败')
-        return response.json()
-      })
+    listHealthHistory(draft.babyId, 'VACCINE')
       .then(records => {
-        if (!cancelled) setVaccineSuggestions(buildVaccineSuggestions(Array.isArray(records) ? records : []))
+        if (!cancelled) setVaccineSuggestions(buildVaccineSuggestions(records))
       })
       .catch(error => {
         console.error(error)
@@ -257,48 +257,38 @@ export default function RecordComposerEditor({
     setSubmitError('')
 
     try {
-      let endpoint = '/api/feeding'
-      let body: Record<string, unknown>
+      let result: { id: string }
 
       if (kind === 'feeding') {
-        body = {
+        const input = {
           babyId: draft.babyId,
           type,
           startTime: toBeijingISO(draft.eventTime || getBeijingNow()),
           notes: draft.notes.trim() || null,
           ...buildFeedingRecordPayload(type as FeedingType, feedingValues),
-        }
+        } as FeedingRecordInput
+        result = await commit(() => createFeedingRecord(input))
       } else if (kind === 'health') {
-        endpoint = '/api/health'
         const recordTime = type === 'SLEEP'
           ? draft.sleepEndTime || draft.sleepStartTime || draft.eventTime || getBeijingNow()
           : draft.eventTime || getBeijingNow()
-        body = {
+        const input = {
           babyId: draft.babyId,
           type,
           recordedAt: toBeijingISO(recordTime),
           notes: draft.notes.trim() || null,
           ...buildHealthRecordPayload(type as HealthType, healthValues),
-        }
+        } as HealthRecordInput
+        result = await commit(() => createHealthRecord(input))
       } else {
-        endpoint = '/api/memo'
-        body = {
+        const input = {
           babyId: draft.babyId,
           title: draft.memoTitle.trim(),
           content: draft.memoContent.trim() || null,
           scheduledAt: toBeijingISO(draft.eventTime || getBeijingNow()),
-        }
+        } as MemoInput
+        result = await commit(() => createMemo(input))
       }
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || '保存失败，请重试')
-
-      invalidateRecordRelatedCaches(draft.babyId)
       window.sessionStorage.setItem('record_saved_ts', String(Date.now()))
       window.sessionStorage.removeItem('baby-feed:add-record-feeding-draft')
       window.sessionStorage.removeItem('baby-feed:add-record-health-draft')

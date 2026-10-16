@@ -10,6 +10,7 @@ import HealthRecordFields, { getHealthFieldValidationMessage } from '@/component
 import RecordActionBar from '@/components/RecordActionBar'
 import { RecordNotesField, RecordTimeField } from '@/components/RecordMetaFields'
 import type { PrimaryToothCode } from '@/lib/tooth-eruptions'
+import { listHealthHistory } from '@/lib/local-store/records'
 
 interface FeedingRecord {
   id: string
@@ -161,13 +162,8 @@ export default function TimelineEditRecordModal({ record, onSave, onCancel, savi
       setVaccineSuggestionsLoading(true)
 
       try {
-        const response = await fetch(`/api/health?babyId=${record.babyId}&type=VACCINE`)
-        if (!response.ok) {
-          throw new Error('获取疫苗记录失败')
-        }
-
-        const data = await response.json()
-        if (!Array.isArray(data) || cancelled) {
+        const data = await listHealthHistory(record.babyId, 'VACCINE')
+        if (cancelled) {
           return
         }
 

@@ -121,10 +121,18 @@ export async function deleteFeedingRecord(id: string, babyId: string): Promise<v
 export async function listHealthHistory(
   babyId: string,
   type: HealthType,
-): Promise<LocalHealthRecord[]> {
+): Promise<Array<LocalHealthRecord & { toothEruptions: { toothCode: PrimaryToothCode }[] }>> {
   const db = await openBabyFeedDb()
   const records = await db.getAllFromIndex(STORE_NAMES.healthRecords, 'by-baby-type-time', healthRange(babyId, type))
-  return records.reverse()
+  const newestFirst = records.reverse()
+  if (type !== 'TOOTH_ERUPTION') {
+    return newestFirst.map(record => ({ ...record, toothEruptions: [] }))
+  }
+  return Promise.all(newestFirst.map(async record => ({
+    ...record,
+    toothEruptions: (await db.getAllFromIndex(STORE_NAMES.toothEruptions, 'by-health-record', record.id))
+      .map(tooth => ({ toothCode: tooth.toothCode })),
+  })))
 }
 
 async function assertTeethAvailable(

@@ -14,6 +14,14 @@ import Link from 'next/link'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getRecordIcon, getRecordTitle } from '@/lib/record-display'
 import type { DisplayRecord } from '@/lib/record-display'
+import { useLocalData } from '@/components/LocalDataProvider'
+import {
+  deleteFeedingRecord,
+  deleteHealthRecord,
+  updateFeedingRecord,
+  updateHealthRecord,
+} from '@/lib/local-store/records'
+import type { FeedingRecordInput, HealthRecordInput } from '@/lib/local-store/schema'
 
 interface Baby {
   id: string
@@ -286,6 +294,7 @@ export default function TimelineComponent({
   initialRecords = [],
   initialValidDates = [],
 }: Props) {
+  const { commit } = useLocalData()
   const [babies, setBabies] = useState<Baby[]>(initialBabies)
   const [records, setRecords] = useState<TimelineRecord[]>(initialRecords)
   const [validDates, setValidDates] = useState<string[]>(initialValidDates)
@@ -521,18 +530,10 @@ export default function TimelineComponent({
     if (!deleteTarget || !selectedBabyId) return
 
     try {
-      const encodedBabyId = encodeURIComponent(selectedBabyId)
-      const endpoint = deleteTarget.type === 'feeding'
-        ? `/api/feeding/${deleteTarget.id}?babyId=${encodedBabyId}`
-        : `/api/health/${deleteTarget.id}?babyId=${encodedBabyId}`
-      const response = await fetch(endpoint, { method: 'DELETE' })
-      
-      if (response.ok) {
-        invalidateRequestCache(`timeline:${selectedBabyId}:`)
-        invalidateRequestCache(buildTimelineDatesCacheKey(selectedBabyId))
-        const nextValidDates = await fetchValidDates(selectedBabyId)
-        await syncDateToNearestValid(selectedBabyId, nextValidDates)
-      }
+      await commit(() => deleteTarget.type === 'feeding'
+        ? deleteFeedingRecord(deleteTarget.id, selectedBabyId)
+        : deleteHealthRecord(deleteTarget.id, selectedBabyId))
+      setRecords(current => current.filter(record => record.id !== deleteTarget.id))
     } catch (error) {
       console.error('删除失败:', error)
     } finally {
@@ -554,27 +555,21 @@ export default function TimelineComponent({
     setSaving(true)
     try {
       const isFeeding = editingRecord.recordType === 'feeding'
-      const encodedBabyId = encodeURIComponent(selectedBabyId)
-      const endpoint = isFeeding
-        ? `/api/feeding/${editingRecord.id}?babyId=${encodedBabyId}`
-        : `/api/health/${editingRecord.id}?babyId=${encodedBabyId}`
-      
-      const response = await fetch(endpoint, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      })
-
-      if (response.ok) {
-        setEditingRecord(null)
-        invalidateRequestCache(`timeline:${selectedBabyId}:`)
-        invalidateRequestCache(buildTimelineDatesCacheKey(selectedBabyId))
-        const nextValidDates = await fetchValidDates(selectedBabyId)
-        await syncDateToNearestValid(selectedBabyId, nextValidDates)
-      } else {
-        const err = await response.json()
-        alert(err.error || '保存失败')
-      }
+      const updated = isFeeding
+        ? await commit(() => updateFeedingRecord(
+            editingRecord.id,
+            selectedBabyId,
+            { ...data, babyId: selectedBabyId } as FeedingRecordInput,
+          ))
+        : await commit(() => updateHealthRecord(
+            editingRecord.id,
+            selectedBabyId,
+            { ...data, babyId: selectedBabyId } as HealthRecordInput,
+          ))
+      setRecords(current => current.map(record => record.id === editingRecord.id
+        ? { ...record, ...updated }
+        : record))
+      setEditingRecord(null)
     } catch (error) {
       console.error('更新失败:', error)
       alert('保存失败，请重试')

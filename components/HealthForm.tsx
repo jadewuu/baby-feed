@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getBeijingNow, toBeijingISO } from '@/lib/time'
-import { invalidateRecordRelatedCaches } from '@/lib/cache-helpers'
+import { useLocalData } from '@/components/LocalDataProvider'
+import { createHealthRecord, listHealthHistory } from '@/lib/local-store/records'
+import type { HealthRecordInput } from '@/lib/local-store/schema'
 import { buildHealthRecordPayload, buildVaccineSuggestions, findSelectedVaccineSuggestion, type HealthFieldValues, type HealthType, type VaccineSuggestion } from '@/lib/health-records'
 import HealthRecordFields, { getHealthFieldValidationMessage } from '@/components/HealthRecordFields'
 import RecordActionBar from '@/components/RecordActionBar'
@@ -101,6 +103,7 @@ export default function HealthForm({
   onTabChange
 }: Props) {
   const router = useRouter()
+  const { babies: localBabies, activeBabyId, commit } = useLocalData()
   const [babies, setBabies] = useState<BabyInfo[]>(initialBabies)
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -142,15 +145,10 @@ export default function HealthForm({
   const hasHydratedLocalDraft = useRef(false)
 
   useEffect(() => {
-    if (initialBabies.length > 0) {
-      setBabies(initialBabies)
-      setBabyId(currentBabyId => currentBabyId || initialSharedDraft?.babyId || initialBabies[0].id)
-      return
-    }
-
-    fetchBabies()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialBabies, initialSharedDraft?.babyId])
+    const availableBabies = localBabies.length > 0 ? localBabies : initialBabies
+    setBabies(availableBabies)
+    setBabyId(currentBabyId => currentBabyId || initialSharedDraft?.babyId || activeBabyId || availableBabies[0]?.id || '')
+  }, [activeBabyId, initialBabies, initialSharedDraft?.babyId, localBabies])
 
   useEffect(() => {
     if (initialType) {
@@ -339,13 +337,8 @@ export default function HealthForm({
       setVaccineSuggestionsLoading(true)
 
       try {
-        const response = await fetch(`/api/health?babyId=${babyId}&type=VACCINE`)
-        if (!response.ok) {
-          throw new Error('获取疫苗记录失败')
-        }
-
-        const data = await response.json()
-        if (!Array.isArray(data) || cancelled) {
+        const data = await listHealthHistory(babyId, 'VACCINE')
+        if (cancelled) {
           return
         }
 
@@ -379,23 +372,6 @@ export default function HealthForm({
 
     setSelectedVaccineSuggestionKey(matchedSuggestion?.key || '')
   }, [vaccineDoseNumber, vaccineManufacturer, vaccineName, vaccineSuggestions, vaccineTotalDoses])
-
-  const fetchBabies = async () => {
-    try {
-      const response = await fetch('/api/babies')
-      if (response.ok) {
-        const data = await response.json()
-        if (Array.isArray(data)) {
-          setBabies(data)
-          if (data.length > 0) {
-            setBabyId(currentBabyId => currentBabyId || initialSharedDraft?.babyId || data[0].id)
-          }
-        }
-      }
-    } catch (error) {
-      console.error('获取婴儿列表失败:', error)
-    }
-  }
 
   const getValidationMessage = () => {
     if (!babyId) {
@@ -468,27 +444,16 @@ export default function HealthForm({
 
     let saved = false
     try {
-      const data: Record<string, unknown> = {
+      const data = {
         babyId,
         type,
         recordedAt: toBeijingISO(recordedAt),
         notes: notes.trim() || null,
         ...buildHealthRecordPayload(type, fieldValues),
-      }
+      } as HealthRecordInput
 
-      const response = await fetch('/api/health', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      })
-
-      if (response.ok) {
-        saved = true
-      } else {
-        const error = await response.json()
-        const message = error.error || '保存失败'
-        setSubmitError(message)
-      }
+      await commit(() => createHealthRecord(data))
+      saved = true
     } catch (error) {
       console.error('保存失败:', error)
       setSubmitError('保存失败，请重试')
@@ -498,7 +463,6 @@ export default function HealthForm({
 
     // 保存成功后的跳转操作放在 try 外部，避免 router 异常触发假失败
     if (saved) {
-      invalidateRecordRelatedCaches(babyId)
       window.sessionStorage.removeItem(HEALTH_DRAFT_STORAGE_KEY)
       window.sessionStorage.setItem('record_saved_ts', String(Date.now()))
       onRecordSaved?.()

@@ -11,6 +11,7 @@ import {
   type PrimaryToothCode,
   type ToothEruptionEventLike,
 } from '@/lib/tooth-eruptions'
+import { listHealthHistory } from '@/lib/local-store/records'
 
 interface ToothRecord extends ToothEruptionEventLike {
   createdAt: string
@@ -57,14 +58,9 @@ export default function ToothEruptionFields({
     let cancelled = false
     setLoading(true)
     setLoadError('')
-    fetch(`/api/health?babyId=${babyId}&type=TOOTH_ERUPTION`)
-      .then(async response => {
-        const result = await response.json().catch(() => null)
-        if (!response.ok) throw new Error(result?.error || '获取牙齿记录失败')
-        return result
-      })
+    listHealthHistory(babyId, 'TOOTH_ERUPTION')
       .then(result => {
-        if (!cancelled) setRecords(Array.isArray(result) ? result : [])
+        if (!cancelled) setRecords(result)
       })
       .catch(error => {
         if (!cancelled) setLoadError(error instanceof Error ? error.message : '获取牙齿记录失败')

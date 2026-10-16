@@ -11,6 +11,7 @@ import {
 import { formatBeijingDateTimeLabel, toBeijingISO } from '@/lib/time'
 import ToothEruptionFields from '@/components/ToothEruptionFields'
 import type { PrimaryToothCode } from '@/lib/tooth-eruptions'
+import { listHealthHistory } from '@/lib/local-store/records'
 
 interface HealthFieldSetters {
   setWeight: (value: string) => void
@@ -183,40 +184,28 @@ export default function HealthRecordFields({
       return
     }
 
-    const controller = new AbortController()
+    let cancelled = false
     setHistoryRecords([])
     setHistoryLoading(true)
 
-    fetch(`/api/health?babyId=${encodeURIComponent(babyId)}&type=${historyType}`, {
-      signal: controller.signal,
-    })
-      .then(async response => {
-        if (!response.ok) {
-          throw new Error('获取历史健康记录失败')
-        }
-        return response.json()
-      })
+    listHealthHistory(babyId, historyType)
       .then(records => {
-        if (Array.isArray(records)) {
+        if (!cancelled) {
           setHistoryRecords(records)
           setHistoryRecordsKey(historyRequestKey)
         }
       })
       .catch(error => {
-        if (error instanceof Error && error.name === 'AbortError') {
-          return
-        }
+        if (cancelled) return
         console.error('获取健康记录历史提示失败:', error)
         setHistoryRecords([])
         setHistoryRecordsKey('')
       })
       .finally(() => {
-        if (!controller.signal.aborted) {
-          setHistoryLoading(false)
-        }
+        if (!cancelled) setHistoryLoading(false)
       })
 
-    return () => controller.abort()
+    return () => { cancelled = true }
   }, [babyId, historyEnabled, historyRequestKey, historyType])
 
   const applyMedicationSuggestion = (suggestion: MedicationSuggestion) => {

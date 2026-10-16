@@ -23,12 +23,11 @@ import {
   X,
 } from 'lucide-react'
 import AdaptiveDialog from '@/components/AdaptiveDialog'
+import { useLocalData } from '@/components/LocalDataProvider'
 import RecordComposerEditor from '@/components/record-composer/RecordComposerEditor'
 import { getBeijingNow, toBeijingDatetimeLocal } from '@/lib/time'
-import { invalidateRecordRelatedCaches } from '@/lib/cache-helpers'
-import {
-  getActiveTimerStorageKey,
-} from '@/lib/client-cache'
+import { deleteMemo } from '@/lib/local-store/memos'
+import { deleteFeedingRecord, deleteHealthRecord } from '@/lib/local-store/records'
 import {
   createComposerDraft,
   getComposerTypeFromQuery,
@@ -56,6 +55,7 @@ interface RecordComposerContextValue {
 
 const RecordComposerContext = createContext<RecordComposerContextValue | null>(null)
 const SAVED_RECORD_TOAST_DURATION_MS = 3000
+const ACTIVE_TIMER_STORAGE_KEY = 'baby-feed:record-composer-active-timer'
 
 export function useRecordComposer() {
   const context = useContext(RecordComposerContext)
@@ -92,14 +92,14 @@ function parseStoredActiveTimer(value: string): ActiveRecordTimer | null {
 export function RecordComposerProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
-  const status = 'authenticated'
   const userId = 'local'
+  const { babies: localBabies, activeBabyId, commit } = useLocalData()
+  const babies: BabyOption[] = useMemo(() => localBabies.map(baby => ({ id: baby.id, name: baby.name })), [localBabies])
+  const defaultBabyId = activeBabyId ?? babies[0]?.id ?? ''
+  const babiesLoading = false
+  const babiesError = ''
   const [isOpen, setIsOpen] = useState(false)
   const [selectedType, setSelectedType] = useState<ComposerRecordType | null>(null)
-  const [babies, setBabies] = useState<BabyOption[]>([])
-  const [defaultBabyId, setDefaultBabyId] = useState('')
-  const [babiesLoading, setBabiesLoading] = useState(false)
-  const [babiesError, setBabiesError] = useState('')
   const [drafts, setDrafts] = useState<Partial<Record<ComposerRecordType, ComposerDraft>>>({})
   const [savedRecord, setSavedRecord] = useState<SavedRecord | null>(null)
   const [toastError, setToastError] = useState('')
@@ -113,9 +113,6 @@ export function RecordComposerProvider({ children }: { children: ReactNode }) {
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const discardPreviousFocusRef = useRef<HTMLElement | null>(null)
   const routeOpenedRef = useRef(false)
-  const babiesRequestInFlightRef = useRef(false)
-  const previousUserIdRef = useRef<string | null>(null)
-  const persistedTimerUserIdRef = useRef<string | null>(null)
   const activeTimer = ownedActiveTimer?.userId === userId ? ownedActiveTimer.timer : null
 
   const setActiveTimer = useCallback((
@@ -133,12 +130,8 @@ export function RecordComposerProvider({ children }: { children: ReactNode }) {
   }, [userId])
 
   useEffect(() => {
-    previousUserIdRef.current = userId
-
     setIsOpen(false)
     setSelectedType(null)
-    setBabies([])
-    setDefaultBabyId('')
     setDrafts({})
     setSavedRecord(null)
     setToastError('')
@@ -148,31 +141,24 @@ export function RecordComposerProvider({ children }: { children: ReactNode }) {
 
     try {
       window.localStorage.removeItem('baby-feed:record-composer-recents')
-      window.localStorage.removeItem('baby-feed:record-composer-active-timer')
-      const storedTimer = window.localStorage.getItem(getActiveTimerStorageKey(userId))
+      const storedTimer = window.localStorage.getItem(ACTIVE_TIMER_STORAGE_KEY)
       if (storedTimer) {
         const parsedTimer = parseStoredActiveTimer(storedTimer)
         if (parsedTimer) setOwnedActiveTimer({ userId, timer: parsedTimer })
-        else window.localStorage.removeItem(getActiveTimerStorageKey(userId))
+        else window.localStorage.removeItem(ACTIVE_TIMER_STORAGE_KEY)
       }
     } catch (error) {
       console.error('恢复记录面板状态失败:', error)
     }
-  }, [setActiveTimer, status, userId])
+  }, [setActiveTimer, userId])
 
   useEffect(() => {
-    const previousOwner = persistedTimerUserIdRef.current
     try {
-      if (previousOwner && previousOwner !== ownedActiveTimer?.userId) {
-        window.localStorage.removeItem(getActiveTimerStorageKey(previousOwner))
-      }
       if (ownedActiveTimer) {
-        window.localStorage.setItem(
-          getActiveTimerStorageKey(ownedActiveTimer.userId),
-          JSON.stringify(ownedActiveTimer.timer),
-        )
+        window.localStorage.setItem(ACTIVE_TIMER_STORAGE_KEY, JSON.stringify(ownedActiveTimer.timer))
+      } else {
+        window.localStorage.removeItem(ACTIVE_TIMER_STORAGE_KEY)
       }
-      persistedTimerUserIdRef.current = ownedActiveTimer?.userId ?? null
     } catch (error) {
       console.error('保存计时状态失败:', error)
     }
@@ -185,45 +171,16 @@ export function RecordComposerProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(interval)
   }, [activeTimer])
 
-  const loadBabies = useCallback(async () => {
-    if (babiesRequestInFlightRef.current) return
-    babiesRequestInFlightRef.current = true
-    setBabiesLoading(true)
-    setBabiesError('')
-    try {
-      const [babiesResponse, profileResponse] = await Promise.all([
-        fetch('/api/babies'),
-        fetch('/api/user/profile'),
-      ])
-      if (!babiesResponse.ok) throw new Error('宝宝信息加载失败')
-      const babyList = await babiesResponse.json()
-      const profile = profileResponse.ok ? await profileResponse.json() : null
-      const normalized = Array.isArray(babyList)
-        ? babyList.map((baby: { id: string; name: string }) => ({ id: baby.id, name: baby.name }))
-        : []
-      const nextDefault = normalized.some(baby => baby.id === profile?.activeBabyId)
-        ? profile.activeBabyId
-        : normalized[0]?.id || ''
-      setBabies(normalized)
-      setDefaultBabyId(nextDefault)
-      setDrafts(current => {
-        const next = { ...current }
-        Object.entries(next).forEach(([key, draft]) => {
-          if (draft && !draft.babyId) next[key as ComposerRecordType] = { ...draft, babyId: nextDefault }
-        })
-        return next
-      })
-    } catch (error) {
-      setBabiesError(error instanceof Error ? error.message : '宝宝信息加载失败')
-    } finally {
-      babiesRequestInFlightRef.current = false
-      setBabiesLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
-    if (isOpen && status === 'authenticated') void loadBabies()
-  }, [isOpen, loadBabies, status])
+    if (!defaultBabyId) return
+    setDrafts(current => {
+      const next = { ...current }
+      Object.entries(next).forEach(([key, draft]) => {
+        if (draft && !draft.babyId) next[key as ComposerRecordType] = { ...draft, babyId: defaultBabyId }
+      })
+      return next
+    })
+  }, [defaultBabyId])
 
   const ensureDraft = useCallback((type: ComposerRecordType, patch?: DraftPatch) => {
     setDrafts(current => {
@@ -250,7 +207,7 @@ export function RecordComposerProvider({ children }: { children: ReactNode }) {
   }, [ensureDraft])
 
   useEffect(() => {
-    if (status !== 'authenticated' || pathname !== '/add') {
+    if (pathname !== '/add') {
       routeOpenedRef.current = false
       return
     }
@@ -258,7 +215,7 @@ export function RecordComposerProvider({ children }: { children: ReactNode }) {
     routeOpenedRef.current = true
     const queryType = getComposerTypeFromQuery(new URLSearchParams(window.location.search).get('type'))
     openComposer(queryType)
-  }, [openComposer, pathname, status])
+  }, [openComposer, pathname])
 
   const closeImmediately = useCallback(() => {
     setIsOpen(false)
@@ -364,8 +321,7 @@ export function RecordComposerProvider({ children }: { children: ReactNode }) {
     setSavedRecord(record)
     setToastError('')
     closeImmediately()
-    router.refresh()
-  }, [babies, closeImmediately, defaultBabyId, router, selectedType])
+  }, [babies, closeImmediately, defaultBabyId, selectedType])
 
   const startBreastTimer = useCallback((side: 'left' | 'right', babyId: string) => {
     if (activeTimer && !window.confirm('当前有一项计时正在进行。要结束它并开始新的亲喂计时吗？')) return
@@ -423,19 +379,13 @@ export function RecordComposerProvider({ children }: { children: ReactNode }) {
     setUndoing(true)
     setToastError('')
     try {
-      const resource = savedRecord.kind === 'memo' ? 'memo' : savedRecord.kind
-      const response = await fetch(
-        `/api/${resource}/${savedRecord.id}?babyId=${encodeURIComponent(savedRecord.babyId)}`,
-        { method: 'DELETE' },
-      )
-      if (!response.ok) {
-        const result = await response.json().catch(() => null)
-        throw new Error(result?.error || '撤销失败，请到时间轴中删除')
-      }
-      invalidateRecordRelatedCaches(savedRecord.babyId)
+      await commit(() => {
+        if (savedRecord.kind === 'feeding') return deleteFeedingRecord(savedRecord.id, savedRecord.babyId)
+        if (savedRecord.kind === 'health') return deleteHealthRecord(savedRecord.id, savedRecord.babyId)
+        return deleteMemo(savedRecord.id, savedRecord.babyId)
+      })
       window.sessionStorage.setItem('record_saved_ts', String(Date.now()))
       setSavedRecord(null)
-      router.refresh()
     } catch (error) {
       setToastError(error instanceof Error ? error.message : '撤销失败，请到时间轴中删除')
     } finally {
@@ -552,7 +502,7 @@ export function RecordComposerProvider({ children }: { children: ReactNode }) {
             ) : babiesError ? (
               <div className="flex min-h-80 flex-1 flex-col items-center justify-center px-6 text-center">
                 <p className="font-medium text-slate-900">{babiesError}</p>
-                <button type="button" onClick={() => void loadBabies()} className="mt-4 min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">重新加载</button>
+                <button type="button" onClick={() => window.location.reload()} className="mt-4 min-h-11 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700">重新加载</button>
               </div>
             ) : babies.length === 0 ? (
               <div className="flex min-h-80 flex-1 flex-col items-center justify-center px-6 text-center">

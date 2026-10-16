@@ -42,7 +42,6 @@ export function LocalDataProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    setStatus('loading')
     setError(null)
     try {
       const [nextBabies, settings] = await Promise.all([listBabies(), getSettings()])

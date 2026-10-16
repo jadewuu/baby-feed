@@ -7,8 +7,10 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import RecordActionMenu from '@/components/RecordActionMenu'
 import ToothChart, { type EruptedToothState } from '@/components/ToothChart'
 import TimelineEditRecordModal from '@/components/TimelineEditRecordModal'
+import { useLocalData } from '@/components/LocalDataProvider'
 import { StatsPanel } from '@/components/StatsUi'
-import { invalidateRecordRelatedCaches } from '@/lib/cache-helpers'
+import { deleteHealthRecord, updateHealthRecord } from '@/lib/local-store/records'
+import type { HealthRecordInput } from '@/lib/local-store/schema'
 import {
   buildOrderedToothEruptionEvents,
   formatEruptionOrder,
@@ -33,12 +35,8 @@ interface Props {
   onRecordsChanged: () => void | Promise<void>
 }
 
-async function getActionError(response: Response, fallback: string) {
-  const result = await response.json().catch(() => null) as { error?: unknown } | null
-  return typeof result?.error === 'string' ? result.error : fallback
-}
-
 export default function ToothGrowthStats({ records, babyId, onRecordsChanged }: Props) {
+  const { commit } = useLocalData()
   const [showAll, setShowAll] = useState(false)
   const [selectedTooth, setSelectedTooth] = useState<EruptedToothState | null>(null)
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
@@ -91,7 +89,6 @@ export default function ToothGrowthStats({ records, babyId, onRecordsChanged }: 
   }, [feedback])
 
   const refreshAfterMutation = async (targetBabyId: string, mutationId: number) => {
-    invalidateRecordRelatedCaches(targetBabyId)
     if (babyIdRef.current !== targetBabyId || mutationIdRef.current !== mutationId) return
     await onRecordsChanged()
   }
@@ -106,12 +103,11 @@ export default function ToothGrowthStats({ records, babyId, onRecordsChanged }: 
     setMutationError('')
 
     try {
-      const response = await fetch(`/api/health/${targetRecord.id}?babyId=${encodeURIComponent(targetBabyId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      if (!response.ok) throw new Error(await getActionError(response, '保存失败，请重试'))
+      await commit(() => updateHealthRecord(
+        targetRecord.id,
+        targetBabyId,
+        { ...data, babyId: targetBabyId } as HealthRecordInput,
+      ))
 
       if (babyIdRef.current !== targetBabyId || mutationIdRef.current !== mutationId) return
       setEditingRecord(null)
@@ -139,10 +135,7 @@ export default function ToothGrowthStats({ records, babyId, onRecordsChanged }: 
     setMutationError('')
 
     try {
-      const response = await fetch(`/api/health/${targetRecord.id}?babyId=${encodeURIComponent(targetBabyId)}`, {
-        method: 'DELETE',
-      })
-      if (!response.ok) throw new Error(await getActionError(response, '删除失败，请重试'))
+      await commit(() => deleteHealthRecord(targetRecord.id, targetBabyId))
 
       if (babyIdRef.current !== targetBabyId || mutationIdRef.current !== mutationId) return
       setDeleteTarget(null)
