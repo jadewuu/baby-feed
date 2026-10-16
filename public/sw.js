@@ -1,15 +1,15 @@
 /// <reference lib="webworker" />
 
 const CACHE_NAME = 'baby-feed-v9'
-const OFFLINE_URL = '/offline'
+const OFFLINE_URL = '/baby-feed/offline/'
 
 // 预缓存的静态资源
 const PRECACHE_URLS = [
-  '/offline',
-  '/manifest.json',
-  '/icon.svg',
-  '/icons/icon-192x192.png?v=8',
-  '/icons/icon-512x512.png?v=8',
+  '/baby-feed/offline/',
+  '/baby-feed/manifest.json',
+  '/baby-feed/icon.svg',
+  '/baby-feed/icons/icon-192x192.png?v=8',
+  '/baby-feed/icons/icon-512x512.png?v=8',
 ]
 
 // 安装事件：预缓存核心资源
@@ -60,12 +60,6 @@ self.addEventListener('fetch', (event) => {
   // 跳过非 GET 请求
   if (request.method !== 'GET') return
 
-  // 跳过 API 请求（不缓存动态数据）
-  if (url.pathname.startsWith('/api/')) return
-
-  // 跳过 next-auth 相关请求
-  if (url.pathname.includes('next-auth')) return
-
   // 跳过浏览器扩展请求
   if (!url.protocol.startsWith('http')) return
 
@@ -73,7 +67,7 @@ self.addEventListener('fetch', (event) => {
   if (url.searchParams.has('_rsc') || request.headers.get('RSC') === '1') return
 
   // 跳过 Next.js data 请求
-  if (url.pathname.startsWith('/_next/data/')) return
+  if (url.pathname.startsWith('/baby-feed/_next/data/')) return
 
   // Authenticated pages contain user-specific server-rendered data. Never put
   // navigation responses in CacheStorage; only the generic offline page is safe.
@@ -93,8 +87,8 @@ self.addEventListener('fetch', (event) => {
 
   // 静态资源（JS/CSS/字体/图片）：缓存优先
   if (
-    url.pathname.startsWith('/_next/static/') ||
-    url.pathname.startsWith('/icons/') ||
+    url.pathname.startsWith('/baby-feed/_next/static/') ||
+    url.pathname.startsWith('/baby-feed/icons/') ||
     url.pathname.endsWith('.svg') ||
     url.pathname.endsWith('.woff') ||
     url.pathname.endsWith('.woff2')

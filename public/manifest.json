@@ -2,65 +2,65 @@
   "name": "Baby Feed - 婴儿科学喂养与成长记录",
   "short_name": "Baby Feed",
   "description": "记录婴儿喂养、睡眠与成长数据，帮助家庭更科学地了解宝宝的日常状态",
-  "start_url": "/",
+  "start_url": "/baby-feed/",
   "display": "standalone",
   "background_color": "#f0f9ff",
   "theme_color": "#3b82f6",
   "orientation": "portrait-primary",
-  "scope": "/",
+  "scope": "/baby-feed/",
   "lang": "zh-CN",
   "categories": ["health", "lifestyle"],
   "icons": [
     {
-      "src": "/icons/icon-72x72.png?v=8",
+      "src": "/baby-feed/icons/icon-72x72.png?v=8",
       "sizes": "72x72",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-96x96.png?v=8",
+      "src": "/baby-feed/icons/icon-96x96.png?v=8",
       "sizes": "96x96",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-128x128.png?v=8",
+      "src": "/baby-feed/icons/icon-128x128.png?v=8",
       "sizes": "128x128",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-144x144.png?v=8",
+      "src": "/baby-feed/icons/icon-144x144.png?v=8",
       "sizes": "144x144",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-152x152.png?v=8",
+      "src": "/baby-feed/icons/icon-152x152.png?v=8",
       "sizes": "152x152",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-192x192.png?v=8",
+      "src": "/baby-feed/icons/icon-192x192.png?v=8",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-384x384.png?v=8",
+      "src": "/baby-feed/icons/icon-384x384.png?v=8",
       "sizes": "384x384",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-512x512.png?v=8",
+      "src": "/baby-feed/icons/icon-512x512.png?v=8",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icons/icon-maskable.png?v=8",
+      "src": "/baby-feed/icons/icon-maskable.png?v=8",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
