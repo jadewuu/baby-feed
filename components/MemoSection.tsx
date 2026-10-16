@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, CalendarClock, Check, CheckCircle2, ClipboardList, Clock3, Plus } from 'lucide-react'
 import { formatBeijingDateTimeLabel, toBeijingDatetimeLocal } from '@/lib/time'
-import { invalidateRequestCache } from '@/lib/client-request-cache'
 import { StatsPanel, StatsEmptyState } from '@/components/StatsUi'
 import MemoFormModal, { type MemoRecord } from '@/components/MemoFormModal'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import RecordActionMenu from '@/components/RecordActionMenu'
+import { useLocalData } from '@/components/LocalDataProvider'
+import { createMemo, deleteMemo, updateMemo } from '@/lib/local-store/memos'
 
 interface Props {
   memoRecords: MemoRecord[]
@@ -18,43 +19,6 @@ type MemoFeedback = { tone: 'success' | 'error'; message: string }
 
 function getDefaultMemoView(memos: MemoRecord[]): 'pending' | 'completed' {
   return memos.length === 0 || memos.some(memo => !memo.completed) ? 'pending' : 'completed'
-}
-
-function parseMemoRecord(value: unknown): MemoRecord {
-  if (!value || typeof value !== 'object') {
-    throw new Error('服务器返回的备忘数据无效')
-  }
-
-  const record = value as Record<string, unknown>
-  if (
-    typeof record.id !== 'string' ||
-    typeof record.title !== 'string' ||
-    typeof record.scheduledAt !== 'string' ||
-    typeof record.completed !== 'boolean'
-  ) {
-    throw new Error('服务器返回的备忘数据无效')
-  }
-
-  return {
-    id: record.id,
-    title: record.title,
-    content: typeof record.content === 'string' ? record.content : null,
-    scheduledAt: record.scheduledAt,
-    completed: record.completed,
-    completedAt: typeof record.completedAt === 'string' ? record.completedAt : null,
-  }
-}
-
-async function requestJson(url: string, init: RequestInit, fallbackError: string): Promise<unknown> {
-  const response = await fetch(url, init)
-  const payload = await response.json().catch(() => null) as { error?: unknown } | null
-
-  if (!response.ok) {
-    const message = typeof payload?.error === 'string' ? payload.error : fallbackError
-    throw new Error(message)
-  }
-
-  return payload
 }
 
 function formatActionError(error: unknown, fallback: string) {
@@ -108,6 +72,7 @@ function getMemoDayLabel(memo: MemoRecord): { text: string; tone: 'completed' | 
 }
 
 export default function MemoSection({ memoRecords: initialMemos, babyId }: Props) {
+  const { commit } = useLocalData()
   const [memos, setMemos] = useState<MemoRecord[]>(initialMemos)
   const [showForm, setShowForm] = useState(false)
   const [editingMemo, setEditingMemo] = useState<MemoRecord | null>(null)
@@ -161,6 +126,10 @@ export default function MemoSection({ memoRecords: initialMemos, babyId }: Props
   }, [babyId, initialMemos])
 
   useEffect(() => {
+    setMemos(initialMemos)
+  }, [initialMemos])
+
+  useEffect(() => {
     if (!feedback) return
     const timer = window.setTimeout(() => setFeedback(null), feedback.tone === 'success' ? 3000 : 5000)
     return () => window.clearTimeout(timer)
@@ -189,17 +158,12 @@ export default function MemoSection({ memoRecords: initialMemos, babyId }: Props
     setSaving(true)
     setFeedback(null)
     try {
-      const createdMemo = parseMemoRecord(await requestJson('/api/memo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ babyId, ...data }),
-      }, '创建备忘失败'))
+      const createdMemo = await commit(() => createMemo({ babyId, ...data }))
       if (activeBabyIdRef.current === requestBabyId) {
         setMemos(previous => [...previous, createdMemo])
         setShowForm(false)
         setActiveView('pending')
         setFeedback({ tone: 'success', message: '备忘已添加' })
-        invalidateRequestCache()
       }
     } catch (error) {
       if (activeBabyIdRef.current === requestBabyId) {
@@ -218,16 +182,11 @@ export default function MemoSection({ memoRecords: initialMemos, babyId }: Props
     setSaving(true)
     setFeedback(null)
     try {
-      const updatedMemo = parseMemoRecord(await requestJson(`/api/memo/${editingId}?babyId=${encodeURIComponent(requestBabyId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      }, '更新备忘失败'))
+      const updatedMemo = await commit(() => updateMemo(editingId, requestBabyId, data))
       if (activeBabyIdRef.current === requestBabyId) {
         replaceMemo(updatedMemo)
         setEditingMemo(null)
         setFeedback({ tone: 'success', message: '备忘已更新' })
-        invalidateRequestCache()
       }
     } catch (error) {
       if (activeBabyIdRef.current === requestBabyId) {
@@ -249,15 +208,10 @@ export default function MemoSection({ memoRecords: initialMemos, babyId }: Props
     setItemBusy(setTogglingIds, memo.id, true)
     setFeedback(null)
     try {
-      const updatedMemo = parseMemoRecord(await requestJson(`/api/memo/${memo.id}?babyId=${encodeURIComponent(requestBabyId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completed: !memo.completed }),
-      }, '更新备忘状态失败'))
+      const updatedMemo = await commit(() => updateMemo(memo.id, requestBabyId, { completed: !memo.completed }))
       if (activeBabyIdRef.current === requestBabyId) {
         replaceMemo(updatedMemo)
         setFeedback({ tone: 'success', message: '备忘已恢复为待办' })
-        invalidateRequestCache()
       }
     } catch (error) {
       if (activeBabyIdRef.current === requestBabyId) {
@@ -277,15 +231,10 @@ export default function MemoSection({ memoRecords: initialMemos, babyId }: Props
     setItemBusy(setTogglingIds, memo.id, true)
     setFeedback(null)
     try {
-      const updatedMemo = parseMemoRecord(await requestJson(`/api/memo/${memo.id}?babyId=${encodeURIComponent(requestBabyId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completed: true }),
-      }, '完成备忘失败'))
+      const updatedMemo = await commit(() => updateMemo(memo.id, requestBabyId, { completed: true }))
       if (activeBabyIdRef.current === requestBabyId) {
         replaceMemo(updatedMemo)
         setFeedback({ tone: 'success', message: '备忘已完成' })
-        invalidateRequestCache()
       }
     } catch (error) {
       if (activeBabyIdRef.current === requestBabyId) {
@@ -309,13 +258,10 @@ export default function MemoSection({ memoRecords: initialMemos, babyId }: Props
     setItemBusy(setDeletingIds, id, true)
     setFeedback(null)
     try {
-      await requestJson(`/api/memo/${id}?babyId=${encodeURIComponent(requestBabyId)}`, {
-        method: 'DELETE',
-      }, '删除备忘失败')
+      await commit(() => deleteMemo(id, requestBabyId))
       if (activeBabyIdRef.current === requestBabyId) {
         setMemos(prev => prev.filter(m => m.id !== id))
         setFeedback({ tone: 'success', message: '备忘已删除' })
-        invalidateRequestCache()
       }
     } catch (error) {
       if (activeBabyIdRef.current === requestBabyId) {

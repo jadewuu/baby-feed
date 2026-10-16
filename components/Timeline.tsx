@@ -7,8 +7,6 @@ import { format, isToday, isYesterday } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { formatBeijingTime, getBeijingHour } from '@/lib/time'
 import { splitDurationByBeijingDay } from '@/lib/api-helpers'
-import { dedupeRequest, invalidateRequestCache } from '@/lib/client-request-cache'
-import type { PreloadedTimelineRecord } from '@/lib/server-timeline'
 import type { PrimaryToothCode } from '@/lib/tooth-eruptions'
 import Link from 'next/link'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
@@ -22,6 +20,7 @@ import {
   updateHealthRecord,
 } from '@/lib/local-store/records'
 import type { FeedingRecordInput, HealthRecordInput } from '@/lib/local-store/schema'
+import { getTimelineDay, listTimelineDates } from '@/lib/local-store/queries'
 
 interface Baby {
   id: string
@@ -76,24 +75,6 @@ interface HealthRecord {
 
 type TimelineRecord = FeedingRecord | HealthRecord
 
-interface Props {
-  selectedBabyId: string | null
-  onSelectBaby: (id: string | null) => void
-  initialBabies?: Baby[]
-  initialSelectedBabyId?: string | null
-  initialDate?: string
-  initialRecords?: PreloadedTimelineRecord[]
-  initialValidDates?: string[]
-}
-
-function buildTimelineCacheKey(babyId: string, dateStr: string) {
-  return `timeline:${babyId}:${dateStr}`
-}
-
-function buildTimelineDatesCacheKey(babyId: string) {
-  return `timeline-dates:${babyId}`
-}
-
 function dateStringToBeijingDate(dateStr: string) {
   return new Date(`${dateStr}T12:00:00+08:00`)
 }
@@ -119,40 +100,6 @@ function getSleepRecordDisplayTime(record: HealthRecord, viewingDateStr: string)
     return record.sleepStartTime
   }
   return record.sleepEndTime ?? record.recordedAt
-}
-
-async function fetchTimelineRecords(babyId: string, dateStr: string) {
-  const [feedingResponse, healthResponse] = await Promise.all([
-    fetch(`/api/feeding?babyId=${babyId}&date=${dateStr}`),
-    fetch(`/api/health?babyId=${babyId}&date=${dateStr}`),
-  ])
-
-  const feedingDataRaw = feedingResponse.ok ? await feedingResponse.json() : []
-  const healthDataRaw = healthResponse.ok ? await healthResponse.json() : []
-  const feedingData = Array.isArray(feedingDataRaw) ? feedingDataRaw : []
-  const healthData = Array.isArray(healthDataRaw) ? healthDataRaw : []
-
-  return [
-    ...feedingData.map((r: FeedingRecord) => ({ ...r, recordType: 'feeding' as const })),
-    ...healthData.map((r: HealthRecord) => ({ ...r, recordType: 'health' as const })),
-  ].sort((a, b) => {
-    const getTime = (rec: FeedingRecord | HealthRecord) => {
-      if (rec.recordType === 'feeding') return new Date(rec.startTime).getTime()
-      const hr = rec as HealthRecord
-      return new Date(getSleepRecordDisplayTime(hr, dateStr)).getTime()
-    }
-    return getTime(b) - getTime(a)
-  })
-}
-
-async function fetchTimelineValidDates(babyId: string) {
-  const response = await fetch(`/api/timeline-dates?babyId=${babyId}`)
-  if (!response.ok) {
-    throw new Error('获取有效日期失败')
-  }
-
-  const data = await response.json()
-  return Array.isArray(data) ? data.filter((item): item is string => typeof item === 'string') : []
 }
 
 function findAdjacentValidDate(validDates: string[], currentDateStr: string, direction: 'prev' | 'next') {
@@ -285,86 +232,30 @@ const TimelineRecordSection = memo(function TimelineRecordSection({
   )
 })
 
-export default function TimelineComponent({
-  selectedBabyId,
-  onSelectBaby,
-  initialBabies = [],
-  initialSelectedBabyId = null,
-  initialDate,
-  initialRecords = [],
-  initialValidDates = [],
-}: Props) {
-  const { commit } = useLocalData()
-  const [babies, setBabies] = useState<Baby[]>(initialBabies)
-  const [records, setRecords] = useState<TimelineRecord[]>(initialRecords)
-  const [validDates, setValidDates] = useState<string[]>(initialValidDates)
-  const [loading, setLoading] = useState(initialBabies.length === 0)
+export default function TimelineComponent() {
+  const { babies, activeBabyId: selectedBabyId, revision, commit } = useLocalData()
+  const [records, setRecords] = useState<TimelineRecord[]>([])
+  const [validDates, setValidDates] = useState<string[]>([])
+  const [loading] = useState(false)
   const [isFetchingRecords, setIsFetchingRecords] = useState(false)
-  const [currentDate, setCurrentDate] = useState(() => (
-    initialDate ? new Date(`${initialDate}T12:00:00+08:00`) : new Date()
-  ))
+  const [loadError, setLoadError] = useState('')
+  const [currentDate, setCurrentDate] = useState(() => new Date())
   const [isCalendarOpen, setIsCalendarOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; type: 'feeding' | 'health' } | null>(null)
   const [editingRecord, setEditingRecord] = useState<TimelineRecord | null>(null)
   const [recordMenuOpenId, setRecordMenuOpenId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const latestRequestKeyRef = useRef<string | null>(null)
+  const latestDatesBabyRef = useRef<string | null>(null)
   const datePickerWrapperRef = useRef<HTMLDivElement | null>(null)
   const calendarInputRef = useRef<HTMLInputElement | null>(null)
-  const [freshFetch] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const savedTs = window.sessionStorage.getItem('record_saved_ts')
-      if (savedTs && Date.now() - Number(savedTs) < 10000) {
-        return true
-      }
-    }
-    return false
-  })
   const currentDateStr = format(currentDate, 'yyyy-MM-dd')
-  const hasInitialRecords = !freshFetch && !!initialDate && selectedBabyId === initialSelectedBabyId && currentDateStr === initialDate
-  const hasInitialValidDates = !freshFetch && selectedBabyId === initialSelectedBabyId
-
-  // If a record was just saved, invalidate cache to ensure fresh API responses
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedTs = window.sessionStorage.getItem('record_saved_ts')
-      if (savedTs && Date.now() - Number(savedTs) < 10000) {
-        invalidateRequestCache()
-      }
-    }
-  }, [])
-
-  const fetchBabies = useCallback(async () => {
-    try {
-      const response = await fetch('/api/babies')
-      if (!response.ok) {
-        console.error('获取婴儿列表失败')
-        setBabies([])
-        return
-      }
-      const data = await response.json()
-      if (Array.isArray(data)) {
-        setBabies(data)
-        if (data.length > 0 && !selectedBabyId) {
-          onSelectBaby(data[0].id)
-        }
-      } else {
-        setBabies([])
-      }
-    } catch (error) {
-      console.error('获取婴儿列表失败:', error)
-      setBabies([])
-    } finally {
-      setLoading(false)
-    }
-  }, [selectedBabyId, onSelectBaby])
 
   const fetchRecordsForDate = useCallback(async (
     babyId: string,
     dateStr: string,
     options?: { applyResult?: boolean; background?: boolean }
   ) => {
-    const cacheKey = buildTimelineCacheKey(babyId, dateStr)
     const shouldApplyResult = options?.applyResult ?? true
     const isBackground = options?.background ?? false
     const requestKey = `${babyId}:${dateStr}`
@@ -372,16 +263,20 @@ export default function TimelineComponent({
     if (shouldApplyResult && !isBackground) {
       latestRequestKeyRef.current = requestKey
       setIsFetchingRecords(true)
+      setLoadError('')
     }
 
     try {
-      const allRecords = await dedupeRequest(cacheKey, () => fetchTimelineRecords(babyId, dateStr))
+      const allRecords = await getTimelineDay(babyId, dateStr)
       if (shouldApplyResult && latestRequestKeyRef.current === requestKey) {
-        setRecords(allRecords)
+        setRecords(allRecords as TimelineRecord[])
       }
       return allRecords
     } catch (error) {
       console.error('获取记录失败:', error)
+      if (shouldApplyResult && latestRequestKeyRef.current === requestKey) {
+        setLoadError(error instanceof Error ? error.message : '获取记录失败')
+      }
       return null
     } finally {
       if (shouldApplyResult && !isBackground && latestRequestKeyRef.current === requestKey) {
@@ -391,14 +286,17 @@ export default function TimelineComponent({
   }, [])
 
   const fetchValidDates = useCallback(async (babyId: string) => {
+    latestDatesBabyRef.current = babyId
     try {
-      const cacheKey = buildTimelineDatesCacheKey(babyId)
-      const data = await dedupeRequest(cacheKey, () => fetchTimelineValidDates(babyId))
-      setValidDates(data)
+      const data = await listTimelineDates(babyId)
+      if (latestDatesBabyRef.current === babyId) setValidDates(data)
       return data
     } catch (error) {
       console.error('获取有效日期失败:', error)
-      setValidDates([])
+      if (latestDatesBabyRef.current === babyId) {
+        setValidDates([])
+        setLoadError(error instanceof Error ? error.message : '获取有效日期失败')
+      }
       return []
     }
   }, [])
@@ -444,40 +342,20 @@ export default function TimelineComponent({
   }, [prefetchDate, validDates])
 
   useEffect(() => {
-    if (initialBabies.length > 0) {
-      setBabies(initialBabies)
-      setLoading(false)
-      if (!selectedBabyId) {
-        onSelectBaby(initialBabies[0].id)
-      }
+    if (!selectedBabyId) {
+      setValidDates([])
       return
     }
-
-    fetchBabies()
-  }, [fetchBabies, initialBabies, onSelectBaby, selectedBabyId])
-
-  useEffect(() => {
-    if (!selectedBabyId) return
-
-    if (hasInitialValidDates) {
-      setValidDates(initialValidDates)
-      return
-    }
-
     void fetchValidDates(selectedBabyId)
-  }, [fetchValidDates, hasInitialValidDates, initialValidDates, selectedBabyId])
+  }, [fetchValidDates, revision, selectedBabyId])
 
   useEffect(() => {
-    if (!selectedBabyId) return
-
-    if (hasInitialRecords) {
-      setRecords(initialRecords)
-      prefetchAdjacentDates(selectedBabyId, currentDateStr)
+    if (!selectedBabyId) {
+      setRecords([])
       return
     }
-
     void fetchRecordsForDate(selectedBabyId, currentDateStr)
-  }, [selectedBabyId, currentDateStr, hasInitialRecords, initialRecords, fetchRecordsForDate, prefetchAdjacentDates])
+  }, [selectedBabyId, currentDateStr, fetchRecordsForDate, revision])
 
   useEffect(() => {
     if (!selectedBabyId || isFetchingRecords) return
@@ -743,6 +621,10 @@ export default function TimelineComponent({
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     )
+  }
+
+  if (loadError) {
+    return <div className="mx-auto max-w-4xl px-4 py-12 text-center text-sm text-red-600" role="alert">{loadError}</div>
   }
 
   if (babies.length === 0) {

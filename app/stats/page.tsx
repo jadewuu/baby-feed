@@ -1,14 +1,7 @@
 import { Suspense } from 'react'
 import StatsPageClient from './StatsPageClient'
-import { getPreloadedStatsPageData } from '@/lib/server-stats'
 
-export default async function StatsPage() {
-  const {
-    initialBabies,
-    initialSelectedBabyId,
-    initialStats,
-  } = await getPreloadedStatsPageData()
-
+export default function StatsPage() {
   return (
     <Suspense fallback={
       <div className="max-w-4xl mx-auto px-3 sm:px-4 py-4 space-y-4">
@@ -17,11 +10,7 @@ export default async function StatsPage() {
         </div>
       </div>
     }>
-      <StatsPageClient
-        initialBabies={initialBabies}
-        initialSelectedBabyId={initialSelectedBabyId}
-        initialStats={initialStats}
-      />
+      <StatsPageClient />
     </Suspense>
   )
 }

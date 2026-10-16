@@ -17,27 +17,24 @@ import {
 import type { Props as LabelProps } from 'recharts/types/component/Label'
 import { Activity, AlertTriangle, Baby as BabyIcon, ChartColumn, CheckCircle2, ChevronDown, ChevronUp, ClipboardList, Clock, Droplets, Lightbulb, Milk, Moon, Pill, Ruler, Scale, Syringe, Thermometer, TrendingUp } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { dedupeRequest, invalidateRequestCache } from '@/lib/client-request-cache'
-import type { PreloadedStatsData } from '@/lib/server-stats'
 import { StatsEmptyState, StatsPanel, StatsRangePicker, StatsSegmentedTabs } from '@/components/StatsUi'
 import MemoSection from '@/components/MemoSection'
 import ToothGrowthStats from '@/components/ToothGrowthStats'
 import { generateWHOCurve } from '@/lib/who-growth-standards'
 import { getBeijingToday } from '@/lib/time'
 import { buildVaccineProgressGroups } from '@/lib/vaccine-progress'
+import { useLocalData } from '@/components/LocalDataProvider'
+import { getStatsSnapshot } from '@/lib/local-store/queries'
+import type { StatsSnapshot } from '@/lib/local-store/view-models'
 
 interface Baby {
   id: string
   name: string
 }
 
-type StatsData = PreloadedStatsData
+type StatsData = StatsSnapshot
 
 interface Props {
-  selectedBabyId: string | null
-  onSelectBaby: (id: string | null) => void
-  initialBabies?: Baby[]
-  initialStats?: PreloadedStatsData | null
   defaultTab?: StatsSubpage
 }
 
@@ -357,12 +354,9 @@ function makeWHOSparseLabel(
 }
 
 export default function StatsComponent({
-  selectedBabyId,
-  onSelectBaby,
-  initialBabies = [],
-  initialStats = null,
   defaultTab = 'dashboard',
 }: Props) {
+  const { babies, activeBabyId: selectedBabyId, revision } = useLocalData()
   const formatTrendAxisDate = (value: number) => {
     const date = new Date(value)
     return `${date.getMonth() + 1}/${date.getDate()}`
@@ -443,9 +437,8 @@ export default function StatsComponent({
     amber: '#d97706',
   }
 
-  const [babies, setBabies] = useState<Baby[]>(initialBabies)
-  const [stats, setStats] = useState<StatsData | null>(initialStats)
-  const [loading, setLoading] = useState(initialBabies.length === 0)
+  const [stats, setStats] = useState<StatsData | null>(null)
+  const [loading] = useState(false)
   const [statsRefreshing, setStatsRefreshing] = useState(false)
   const [statsError, setStatsError] = useState('')
   const [rangeSelection, setRangeSelection] = useState<StatsRangeSelection>({ kind: 'preset', days: 7 })
@@ -456,16 +449,6 @@ export default function StatsComponent({
   const [activeSubpage, setActiveSubpage] = useState<StatsSubpage>(defaultTab)
   const heatmapScrollRef = useRef<HTMLDivElement | null>(null)
   const statsRequestIdRef = useRef(0)
-  const initialStatsUsedRef = useRef(false)
-  const [freshFetch] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const savedTs = window.sessionStorage.getItem('record_saved_ts')
-      if (savedTs && Date.now() - Number(savedTs) < 10000) {
-        return true
-      }
-    }
-    return false
-  })
   const [showCompletedVaccines, setShowCompletedVaccines] = useState(false)
   const today = getBeijingToday()
   const rangeDayCount = rangeSelection.kind === 'preset'
@@ -474,47 +457,11 @@ export default function StatsComponent({
   const rangeLabel = rangeSelection.kind === 'preset'
     ? `近 ${rangeSelection.days} 天`
     : `${rangeSelection.startDate.slice(5).replace('-', '/')} - ${rangeSelection.endDate.slice(5).replace('-', '/')}`
-  const hasInitialStats = !freshFetch && !!initialStats && selectedBabyId === initialStats.baby.id && rangeSelection.kind === 'preset' && rangeSelection.days === 7
 
   // Sync activeSubpage when URL param (defaultTab) changes (e.g. browser back/forward)
   useEffect(() => {
     setActiveSubpage(defaultTab)
   }, [defaultTab])
-
-  // If a record was just saved, invalidate cache to ensure fresh API responses
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedTs = window.sessionStorage.getItem('record_saved_ts')
-      if (savedTs && Date.now() - Number(savedTs) < 10000) {
-        invalidateRequestCache()
-      }
-    }
-  }, [])
-
-  const fetchBabies = useCallback(async () => {
-    try {
-      const response = await fetch('/api/babies')
-      if (!response.ok) {
-        console.error('获取婴儿列表失败')
-        setBabies([])
-        return
-      }
-      const data = await response.json()
-      if (Array.isArray(data)) {
-        setBabies(data)
-        if (data.length > 0 && !selectedBabyId) {
-          onSelectBaby(data[0].id)
-        }
-      } else {
-        setBabies([])
-      }
-    } catch (error) {
-      console.error('获取婴儿列表失败:', error)
-      setBabies([])
-    } finally {
-      setLoading(false)
-    }
-  }, [selectedBabyId, onSelectBaby])
 
   const fetchStats = useCallback(async () => {
     const requestId = ++statsRequestIdRef.current
@@ -525,30 +472,11 @@ export default function StatsComponent({
       return
     }
 
-    if (hasInitialStats && !initialStatsUsedRef.current) {
-      initialStatsUsedRef.current = true
-      setStats(initialStats)
-      setStatsError('')
-      setStatsRefreshing(false)
-      return
-    }
-
     setStatsRefreshing(true)
     setStatsError('')
     setStats(previous => previous?.baby.id === selectedBabyId ? previous : null)
     try {
-      const rangeQuery = rangeSelection.kind === 'preset'
-        ? `days=${rangeSelection.days}`
-        : `startDate=${rangeSelection.startDate}&endDate=${rangeSelection.endDate}`
-      const cacheKey = `stats:${selectedBabyId}:${rangeQuery}`
-      const data = await dedupeRequest<StatsData>(cacheKey, async () => {
-        const response = await fetch(`/api/stats?babyId=${selectedBabyId}&${rangeQuery}`)
-        if (!response.ok) {
-          const payload = await response.json().catch(() => null) as { error?: unknown } | null
-          throw new Error(typeof payload?.error === 'string' ? payload.error : '获取统计数据失败')
-        }
-        return response.json() as Promise<StatsData>
-      })
+      const data = await getStatsSnapshot(selectedBabyId, rangeSelection)
       if (statsRequestIdRef.current === requestId) {
         setStats(data)
       }
@@ -564,24 +492,11 @@ export default function StatsComponent({
         setStatsRefreshing(false)
       }
     }
-  }, [selectedBabyId, rangeSelection, hasInitialStats, initialStats])
-
-  useEffect(() => {
-    if (initialBabies.length > 0) {
-      setBabies(initialBabies)
-      setLoading(false)
-      if (!selectedBabyId) {
-        onSelectBaby(initialBabies[0].id)
-      }
-      return
-    }
-
-    fetchBabies()
-  }, [fetchBabies, initialBabies, onSelectBaby, selectedBabyId])
+  }, [selectedBabyId, rangeSelection])
 
   useEffect(() => {
     fetchStats()
-  }, [fetchStats])
+  }, [fetchStats, revision])
 
   useEffect(() => {
     const node = heatmapScrollRef.current

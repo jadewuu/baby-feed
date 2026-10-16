@@ -1,8 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { formatBeijingTime, getBeijingToday, extractDateStr, parseDateAsBeijing } from '@/lib/time'
-import { invalidateRequestCache } from '@/lib/client-request-cache'
 import Link from 'next/link'
 import {
   Baby as BabyIcon,
@@ -21,6 +20,8 @@ import type { DisplayRecord } from '@/lib/record-display'
 import { useRecordComposer } from '@/components/RecordComposerProvider'
 import { getQuickRecordMeta, type RecordTypeMeta } from '@/components/record-composer/record-types'
 import { DEFAULT_QUICK_RECORD_KEYS, type QuickRecordKey } from '@/lib/quick-records'
+import { useLocalData } from '@/components/LocalDataProvider'
+import { getDashboardSnapshot } from '@/lib/local-store/queries'
 
 interface Baby {
   id: string
@@ -94,16 +95,6 @@ interface DashboardMemo {
   completedAt: string | null
 }
 
-interface Props {
-  selectedBabyId?: string | null
-  onSelectBaby?: (id: string | null) => void
-  initialBabies?: Baby[]
-  initialTodayRecords?: FeedingRecord[]
-  initialTodayHealthRecords?: HealthRecord[]
-  initialRecentMemos?: DashboardMemo[]
-  initialQuickRecordKeys?: QuickRecordKey[]
-}
-
 const quickRecordToneClasses: Record<RecordTypeMeta['tone'], { button: string; icon: string; text: string }> = {
   pink: { button: 'border-pink-100/60 from-pink-50 to-pink-100/80 focus-visible:ring-pink-500', icon: 'text-pink-500', text: 'text-pink-700' },
   blue: { button: 'border-blue-100/60 from-blue-50 to-blue-100/80 focus-visible:ring-blue-500', icon: 'text-blue-500', text: 'text-blue-700' },
@@ -144,39 +135,17 @@ function buildDailyStats(feedingData: FeedingRecord[], healthData: HealthRecord[
   }
 }
 
-export default function Dashboard({
-  selectedBabyId,
-  onSelectBaby,
-  initialBabies = [],
-  initialTodayRecords = [],
-  initialTodayHealthRecords = [],
-  initialRecentMemos = [],
-  initialQuickRecordKeys = [...DEFAULT_QUICK_RECORD_KEYS],
-}: Props) {
+export default function Dashboard() {
   const { openComposer } = useRecordComposer()
-  const [babies, setBabies] = useState<Baby[]>(initialBabies)
-  const [internalSelectedBabyId, setInternalSelectedBabyId] = useState<string | null>(initialBabies[0]?.id ?? null)
-  const [todayRecords, setTodayRecords] = useState<FeedingRecord[]>(initialTodayRecords)
-  const [todayHealthRecords, setTodayHealthRecords] = useState<HealthRecord[]>(initialTodayHealthRecords)
-  const [stats, setStats] = useState<DailyStats | null>(
-    initialTodayRecords.length > 0 || initialTodayHealthRecords.length > 0
-      ? buildDailyStats(initialTodayRecords, initialTodayHealthRecords)
-      : null,
-  )
-  const [loading, setLoading] = useState(initialBabies.length === 0)
-  const [freshFetch] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const savedTs = window.sessionStorage.getItem('record_saved_ts')
-      if (savedTs && Date.now() - Number(savedTs) < 10000) {
-        return true
-      }
-    }
-    return false
-  })
-  const preloadedBabyIdRef = useRef<string | null>(selectedBabyId ?? initialBabies[0]?.id ?? null)
-
-  const resolvedSelectedBabyId = selectedBabyId ?? internalSelectedBabyId
-  const hasInitialTodayData = !freshFetch && (initialTodayRecords.length > 0 || initialTodayHealthRecords.length > 0)
+  const { babies, activeBabyId: resolvedSelectedBabyId, revision } = useLocalData()
+  const [todayRecords, setTodayRecords] = useState<FeedingRecord[]>([])
+  const [todayHealthRecords, setTodayHealthRecords] = useState<HealthRecord[]>([])
+  const [recentMemos, setRecentMemos] = useState<DashboardMemo[]>([])
+  const [quickRecordKeys, setQuickRecordKeys] = useState<QuickRecordKey[]>([...DEFAULT_QUICK_RECORD_KEYS])
+  const [stats, setStats] = useState<DailyStats | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [today, setToday] = useState(getBeijingToday)
 
   const openQuickRecord = (key: QuickRecordKey) => {
     if (key === 'GROUP_FEEDING') {
@@ -190,101 +159,36 @@ export default function Dashboard({
     openComposer(key === 'GROUP_MEMO' ? 'MEMO' : key, { patch: { babyId: resolvedSelectedBabyId || '' } })
   }
 
-  // If a record was just saved, invalidate cache to ensure fresh API responses
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedTs = window.sessionStorage.getItem('record_saved_ts')
-      if (savedTs && Date.now() - Number(savedTs) < 10000) {
-        invalidateRequestCache()
-      }
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    const interval = window.setInterval(() => setToday(getBeijingToday()), 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
 
-  const handleSelectBaby = useCallback((id: string | null) => {
-    if (onSelectBaby) {
-      onSelectBaby(id)
-      return
-    }
-    setInternalSelectedBabyId(id)
-  }, [onSelectBaby])
-
-  const fetchBabies = useCallback(async () => {
-    try {
-      const response = await fetch('/api/babies')
-      if (!response.ok) {
-        console.error('获取婴儿列表失败')
-        setBabies([])
-        return
-      }
-      const data = await response.json()
-      if (Array.isArray(data)) {
-        setBabies(data)
-        if (data.length > 0 && !resolvedSelectedBabyId) {
-          handleSelectBaby(data[0].id)
-        }
-      } else {
-        setBabies([])
-      }
-    } catch (error) {
-      console.error('获取婴儿列表失败:', error)
-      setBabies([])
-    } finally {
+  useEffect(() => {
+    if (!resolvedSelectedBabyId) {
       setLoading(false)
-    }
-  }, [resolvedSelectedBabyId, handleSelectBaby])
-
-  const fetchTodayData = useCallback(async () => {
-    if (!resolvedSelectedBabyId) return
-
-    if (hasInitialTodayData && resolvedSelectedBabyId === preloadedBabyIdRef.current) {
-      setTodayRecords(initialTodayRecords)
-      setTodayHealthRecords(initialTodayHealthRecords)
-      setStats(buildDailyStats(initialTodayRecords, initialTodayHealthRecords))
       return
     }
-    
-    try {
-      const today = getBeijingToday()
-      
-      const feedingResponse = await fetch(
-        `/api/feeding?babyId=${resolvedSelectedBabyId}&date=${today}`
-      )
-      const feedingDataRaw = feedingResponse.ok ? await feedingResponse.json() : []
-      const feedingData: FeedingRecord[] = Array.isArray(feedingDataRaw)
-        ? feedingDataRaw.map(r => ({ ...r, recordType: 'feeding' as const }))
-        : []
-      setTodayRecords(feedingData)
-
-      const healthResponse = await fetch(
-        `/api/health?babyId=${resolvedSelectedBabyId}&date=${today}`
-      )
-      const healthDataRaw = healthResponse.ok ? await healthResponse.json() : []
-      const healthData: HealthRecord[] = Array.isArray(healthDataRaw)
-        ? healthDataRaw.map(r => ({ ...r, recordType: 'health' as const }))
-        : []
-      setTodayHealthRecords(healthData)
-      setStats(buildDailyStats(feedingData, healthData))
-    } catch (error) {
-      console.error('获取今日数据失败:', error)
-    }
-  }, [resolvedSelectedBabyId, hasInitialTodayData, initialTodayHealthRecords, initialTodayRecords])
-
-  useEffect(() => {
-    if (initialBabies.length > 0) {
-      setBabies(initialBabies)
-      setLoading(false)
-      if (!resolvedSelectedBabyId) {
-        handleSelectBaby(initialBabies[0].id)
-      }
-      return
-    }
-
-    fetchBabies()
-  }, [fetchBabies, handleSelectBaby, initialBabies, resolvedSelectedBabyId])
-
-  useEffect(() => {
-    fetchTodayData()
-  }, [fetchTodayData])
+    let cancelled = false
+    setLoading(true)
+    setLoadError('')
+    getDashboardSnapshot(resolvedSelectedBabyId)
+      .then(snapshot => {
+        if (cancelled) return
+        setTodayRecords(snapshot.todayFeedingRecords)
+        setTodayHealthRecords(snapshot.todayHealthRecords)
+        setRecentMemos(snapshot.recentMemos)
+        setQuickRecordKeys(snapshot.quickRecordKeys)
+        setStats(buildDailyStats(snapshot.todayFeedingRecords, snapshot.todayHealthRecords))
+      })
+      .catch(error => {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : '本地数据读取失败')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [resolvedSelectedBabyId, revision, today])
 
   const calculateAge = (birthDate: string) => {
     const birth = parseDateAsBeijing(birthDate)
@@ -326,6 +230,10 @@ export default function Dashboard({
         <div className="animate-spin rounded-full h-12 w-12 border-4 border-brand-100 border-t-brand-500"></div>
       </div>
     )
+  }
+
+  if (loadError) {
+    return <div className="mx-auto max-w-4xl px-4 py-12 text-center text-sm text-red-600" role="alert">{loadError}</div>
   }
 
   if (babies.length === 0) {
@@ -447,7 +355,7 @@ export default function Dashboard({
       )}
 
       {/* 近3天备忘提醒 - 紧凑控件 */}
-      {initialRecentMemos.length > 0 && (
+      {recentMemos.length > 0 && (
         <div className="bg-white rounded-card p-3 shadow-card border border-indigo-50">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5">
@@ -459,7 +367,7 @@ export default function Dashboard({
             </Link>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {initialRecentMemos.map(memo => {
+            {recentMemos.map(memo => {
               const scheduledTime = new Date(memo.scheduledAt).getTime()
               const now = Date.now()
               const diffMs = scheduledTime - now
@@ -496,7 +404,7 @@ export default function Dashboard({
       <div className="bg-white rounded-card p-4 shadow-card border border-blue-50">
         <h3 className="text-base font-bold text-slate-900 mb-3">快捷记录</h3>
         <div className="grid grid-cols-4 gap-2">
-          {initialQuickRecordKeys.map(key => {
+          {quickRecordKeys.map(key => {
             const item = getQuickRecordMeta(key)
             const tone = quickRecordToneClasses[item.tone]
             const Icon = item.icon
