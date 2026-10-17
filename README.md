@@ -10,7 +10,7 @@ Baby Feed 是一个给家庭自用的婴儿喂养与照护记录应用。在线�
 
 ## 本地开发
 
-需要 Node.js 20 或更高版本。
+需要 Node.js 22 或更高版本。
 
 ```bash
 npm install

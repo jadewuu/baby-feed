@@ -12,6 +12,7 @@ test('Pages workflow builds, verifies, uploads, and deploys the static export', 
   assert.match(workflow, /concurrency:[\s\S]*group:\s*pages[\s\S]*cancel-in-progress:\s*false/)
   assert.match(workflow, /uses:\s*actions\/checkout@v7/)
   assert.match(workflow, /uses:\s*actions\/setup-node@v7/)
+  assert.match(workflow, /node-version:\s*22/)
   assert.match(workflow, /run:\s*npm ci/)
   assert.match(workflow, /run:\s*npm test/)
   assert.match(workflow, /run:\s*npx tsc --noEmit/)
